@@ -1,0 +1,90 @@
+#!/bin/bash
+
+# check-os-dependencies
+
+# Shamelessly hacked out of code written by sharuzzaman, 24-aug-2016 and updated updated 29-aug-2016, 
+# 2020-07-16 ardyn@endpointdev.com
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+# We check if there are any dependency errorrs recorded in /var/run/os-dependencies
+
+# if the file did not exist, return as warning and exit
+
+if [[ ! -e /var/run/os-dependencies ]]; then
+  touch /var/run/os-dependencies
+  #fix the selinux context if selinux is enforcing
+ if command -v getenforce &> /dev/null ; then
+   selinuxstatus=$(getenforce)
+   if [[ $selinuxstatus == "Enforcing" ]]; then
+     restorecon /var/run/os-dependencies
+   fi
+ fi
+  echo "UNKNOWN : cannot access /var/run/os-dependencies"
+  exit 3
+fi
+
+lines=`wc -l /var/run/os-dependencies | awk '{print $1}'`
+
+# if the file is empty, no os dependencies needed
+if [[ $lines -lt 1 ]]; then
+  echo "OK : No OS dependency issues detected | pkgs=0"
+  exit 0 # OKAY state
+elif [[ $(head -n1 /var/run/os-dependencies|grep -i "dependency problems"|wc -l) -ne 0 ]]; then
+  echo `cat /var/run/os-dependencies`
+  exit 1 # WARNING state if there's an error
+else #I think we can dispense with the rest of this- Any dependency issues should probably raise an error.
+  pkgs=`cat /var/run/os-dependencies | tr "\n" " "`
+
+  warning_pkgs_list="openssl kernel"
+#  do if pkgs = 0
+  for item in $warning_pkgs_list; do
+    if [[ $pkgs == *$item* ]];then
+       warning_pkgs_conflict+=" $item"
+    fi
+  done
+
+  critical_pkgs_list=""
+  for item in $critical_pkgs_list; do
+    if [[ $pkgs == *$item* ]];then
+       critical_pkgs_conflict+=" $item"
+    fi
+  done
+
+  pkgs_string="$lines pkgs ="
+  if [[ -z $critical_pkgs_conflict && -z $warning_pkgs_conflict ]]; then
+    pkgs_string+=" OK - No warning/critical pkgs"
+  else
+    if [[ ! -z $critical_pkgs_conflict ]]; then
+      pkgs_string+=" Critical: $critical_pkgs_conflict"
+    fi
+    if [[ ! -z $warning_pkgs_conflict ]]; then
+      pkgs_string+=" Warning: ${warning_pkgs_conflict}"
+    fi
+  fi
+
+  perf_data=" | pkgs=$lines"
+
+  # disable Nagios message max length trim
+  #  if [[ ${#pkgs_string} -ge 1024 ]]; then
+  #  perfdata_len=${#perf_data}
+  #  max_len=`expr 1024 - $perfdata_len`
+  #  pkgs_string=${pkgs_string:0:$max_len}
+
+  #  return_string=${pkgs_string}${perf_data}
+  #  else
+  #  return_string=${pkgs_string}${perf_data}
+  #  fi
+
+  return_string=${pkgs_string}${perf_data}
+  echo $return_string
+  if [[ -z $critical_pkgs_conflict && -z $warning_pkgs_conflict ]]; then
+    exit 0
+  elif [[ ! -z $critical_pkgs_conflict ]]; then
+    exit 2
+  elif [[ ! -z $warning_pkgs_conflict ]]; then
+    exit 1
+  else
+    exit 3
+  fi
+fi

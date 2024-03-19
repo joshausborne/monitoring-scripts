@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+#check if any mount point is read only, due to filesystem errors
+
+mountpoint=`grep "\sro[\s,]" /proc/mounts | grep -v tmpfs`
+
+if [[ -f /etc/nagios/check_mountpoint_readonly_whitelist ]]; then
+  mountpoint=`echo "$mountpoint" | grep -vf /etc/nagios/check_mountpoint_readonly_whitelist`
+fi
+
+if [[ -z $mountpoint ]]; then
+  message="OK"
+  exit_status=0
+else
+  message="Mount point read only: $mountpoint"
+  exit_status=1
+fi
+
+echo $message
+exit $exit_status

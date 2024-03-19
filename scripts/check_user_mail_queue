@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+WARNING_THRESHOLD=1
+CRITICAL_THRESHOLD=99
+TARGET_USER="nouser"
+
+while getopts ":w:c:u:" opt; do
+  case $opt in
+    w)
+      #echo "-w was triggered, Parameter: $OPTARG" >&2
+      WARNING_THRESHOLD=$OPTARG
+      ;;
+    c)
+      #echo "-c was triggered, Parameter: $OPTARG" >&2
+      CRITICAL_THRESHOLD=$OPTARG
+      ;;
+    u)
+      #echo "-u was triggered, Parameter: $OPTARG" >&2
+      TARGET_USER=$OPTARG
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      exit 1
+      ;;
+    :)
+      echo "Option -$OPTARG requires an argument." >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ $TARGET_USER == "nouser" ]; then
+    echo "Please specify a user with -u";
+    exit 3
+fi
+
+if ! id "$TARGET_USER" >/dev/null 2>&1; then
+    echo "User $TARGET_USER does not exists";
+    exit 3
+fi
+
+if [ ! -f /var/spool/mail/$TARGET_USER ]; then
+    echo "OK - No mail in local queue for user $TARGET_USER";
+    exit 0
+fi
+
+COUNT=`grep "From " /var/spool/mail/$TARGET_USER | wc -l`
+
+if [ "$COUNT" -lt "$WARNING_THRESHOLD" ]; then
+    echo "OK - $COUNT mail in local queue for user $TARGET_USER"
+    exit 0
+elif [[ ( "$COUNT" -ge "$WARNING_THRESHOLD" ) && ( "$COUNT" -lt "$CRITICAL_THRESHOLD" ) ]]; then
+    echo "WARNING - $COUNT mail in local queue for user $TARGET_USER"
+    exit 1
+elif [ "$COUNT" -ge "$CRITICAL_THRESHOLD" ]; then
+    echo "CRITICAL - $COUNT mail in local queue for user $TARGET_USER"
+    exit 2
+fi

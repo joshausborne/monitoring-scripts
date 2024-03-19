@@ -1,0 +1,48 @@
+#!/bin/bash 
+
+# check_mod_status
+
+# created on 31-aug-2016 by sharuzzaman
+# updated on 6-sep-2016 - added curl command for nginx
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+# identify the server we have
+server=`curl -sI http://localhost/server-status|grep Server| awk '{print $2}'|awk -F"/" '{print $1}'| tr '[:upper:]' '[:lower:]'|tr -d '[:space:]'` 
+
+if [ $server == "httpd" -o $server == "apache" ]; then
+  # curl the page and assign to variable
+  data=`curl -s http://localhost/server-status?auto`
+  total_accesses=`echo "$data"|grep "Total Accesses"|awk '{print $3}'`
+  total_kbytes=`echo "$data"|grep "Total kBytes"|awk '{print $3}'`
+  cpuload=`echo "$data"|grep "CPULoad"|awk '{print $2}'`
+  if [[ $cpuload =~ .*[0-9]e.* ]]; then
+    cpuload=`echo $cpuload | awk '{printf "%9.9f",$1}'`
+  fi
+  uptime=`echo "$data"|grep "^Uptime"|awk '{print $2}'`
+  reqpersec=`echo "$data"|grep "ReqPerSec"|awk '{print $2}'`
+  bytespersec=`echo "$data"|grep "BytesPerSec"|awk '{print $2}'`
+  bytesperreq=`echo "$data"|grep "BytesPerReq"|awk '{print $2}'`
+  busyworkers=`echo "$data"|grep "BusyWorkers"|awk '{print $2}'`
+  idleworkers=`echo "$data"|grep "IdleWorkers"|awk '{print $2}'`
+
+  output="total_accesses="${total_accesses:-0}" total_kbytes="${total_kbytes:-0}" cpuload="${cpuload:-0}" uptime="${uptime:-0}" reqpersec="${reqpersec:-0}" bytespersec="${bytespersec:-0}" bytesperreq="${bytesperreq:-0}" busyworkers="${busyworkers:-0}" idleworkers="${idleworkers:-0}
+  echo "OK | $output"
+  exit_status=0
+elif [ $server == "nginx" ]; then
+  data=`curl -s http://localhost/nginx_status`
+  active_connections=`echo "$data" | grep "Active" | awk '{print $3}'`
+  server_accepts=`echo "$data" | grep -Ev '[[:alpha:]]' | awk '{print $1}'`
+  server_handled=`echo "$data" | grep -Ev '[[:alpha:]]' | awk '{print $2}'`
+  server_requests=`echo "$data" | grep -Ev '[[:alpha:]]'| awk '{print $3}'`
+  reading=`echo "$data" | tail -n 1 |awk '{print $2}'`
+  writing=`echo "$data" | tail -n 1 |awk '{print $4}'`
+  waiting=`echo "$data" | tail -n 1 |awk '{print $6}'`
+  echo "OK | active_connections=$active_connections server_accepts=$server_accepts server_handled=$server_handled server_requests=$server_requests reading=$reading writing=$writing waiting=$waiting"
+  exit_status=0
+else
+  echo "Something wrong"
+  exit_status=1
+fi
+
+exit $exit_status

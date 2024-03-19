@@ -1,0 +1,69 @@
+#!/usr/bin/perl
+
+# This script inspects iptables- makes sure it is running
+# and setup with End Point's standard dynamic_ip chain
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+use strict;
+use warnings;
+use Getopt::Long;
+
+my %opt;
+GetOptions(\%opt, '4','6','v','dual','help|h');
+
+if ($opt{h}) {
+    print "Usage: $0 [-4|-6|--dual] [-v] [-h|--help]\n";
+    print "  Defaults to -4 for IPv4.\n";
+    exit 3;
+}
+
+$opt{4} = 1  unless $opt{6};  # default to IPv4 unless -6 specified
+
+check_iptables('4')  if ($opt{4} || $opt{dual});
+check_iptables('6')  if ($opt{6} || $opt{dual});
+
+my $cmd = ($opt{dual}) ? 'iptables and ip6tables' :
+          ($opt{6})    ? 'ip6tables' : 
+          'iptables';
+
+print "EP_IPTABLES OK: $cmd running and configured for End Point\n";
+exit 0;
+
+
+#-----------------------------------------------------------------
+
+sub check_iptables {
+    my $ip_version = shift;
+    my $cmd = ($ip_version eq '6') ? 'ip6tables' : 'iptables';
+    print "Running /usr/sbin/$cmd -nL\n"  if ($opt{v});
+    my $iptables_running = `/usr/sbin/$cmd -nL`;
+
+    # Make sure iptables config loaded OK
+    my $ip_tables_ok = 0;
+    if ($iptables_running =~ /\b(hostname1|hostname2|hostname3|etc)\b/) {
+        print "Found regex match of $1\n"  if ($opt{v});
+        $ip_tables_ok = 1;
+    }
+    elsif ($iptables_running =~ m{\b(2607:f0d0:1111:abcd|192.168.1.1|10.10.10.10|2a01:abc:123:abcd|172.16.0.1)\b}) {
+        # plug in your own IPs on the prior line 
+        print "Found regex match of $1\n"  if ($opt{v});
+        $ip_tables_ok = 1; 
+    }
+    else {
+        print "Failed to find expected matches in $cmd output:\n$iptables_running\n"  if ($opt{v});
+    }
+
+    if ( ! $ip_tables_ok ) {
+        print "EP_IPTABLES CRITICAL: $cmd not running or not configured properly for End Point.\n";
+        exit 2;
+    }
+
+    # Make sure dynamic_ip chain is present
+    if ( $iptables_running !~ /Chain dynamic_ip/) {
+        print "EP_IPTABLES WARNING: $cmd does not contain 'dynamic_ip' chain.\n";
+        exit 1;
+    }
+
+    return;
+}

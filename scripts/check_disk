@@ -1,0 +1,314 @@
+#!/bin/bash
+
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+PROGNAME=`basename $0`
+
+usage() {
+    echo ""
+    echo "Usage:"
+    echo " $PROGNAME -w limit -c limit [-W limit] [-K limit] [-p path] [-u unit]"
+    echo ""
+    echo "Options:"
+    echo " -h"
+    echo "    Print this help screen"
+    echo " -w=INTEGER"
+    echo "    Exit with WARNING status if less than INTEGER units of disk are free"
+    echo " -w=PERCENT%"
+    echo "    Exit with WARNING status if less than PERCENT of disk space is free"
+    echo " -c=INTEGER"
+    echo "    Exit with CRITICAL status if less than INTEGER units of disk are free"
+    echo " -c=PERCENT%"
+    echo "    Exit with CRITICAL status if less than PERCENT of disk space is free"
+    echo " -W=PERCENT%"
+    echo "    Exit with WARNING status if less than PERCENT of inode space is free"
+    echo " -K=PERCENT%"
+    echo "    Exit with CRITICAL status if less than PERCENT of inode space is free"
+    echo " -p=PATH, -p=PARTITION"
+    echo "    Mount point or block device as emitted by the mount(8) command"
+    echo " -u=STRING"
+    echo "    Choose bytes, kB, MB, GB, TB (default: MB)"
+    echo ""
+    exit 3
+}
+
+check_number() {
+    if ! [[ $1 =~ ^[0-9]+$ ]] ; then usage; fi
+}
+
+# Find needed commands
+
+AWK=`which awk 2>&1`
+AWK_EXISTS=$?
+if [ "$AWK_EXISTS" != 0 ] || [ ${#AWK} == 0 ]
+then
+	echo "Error - can't find awk."
+	exit 3
+fi	
+GREP=`which grep 2>&1`
+GREP_EXISTS=$?
+if [ "$GREP_EXISTS" != 0 ] || [ ${#GREP} == 0 ]
+then
+	echo "Error - can't find grep."
+	exit 3
+fi	
+DF=`which df 2>&1`
+DF_EXISTS=$?
+if [ "$DF_EXISTS" != 0 ] || [ ${#DF} == 0 ]
+then
+	echo "Error - can't find df."
+	exit 3
+fi	
+
+UNAME=`which uname 2>&1`
+UNAME_EXISTS=$?
+if [ "$UNAME_EXISTS" != 0 ] || [ ${#UNAME} == 0 ]
+then
+	echo "Error - can't find uname."
+	exit 3
+fi	
+
+# Set defaults
+
+UNAMESTR=`$UNAME`
+
+WPERCENT=""
+CPERCENT=""
+WINT=""
+CINT=""
+WINODE=""
+CINODE=""
+VOLUME="/"
+if [[ "$UNAMESTR" == 'OpenBSD' ]]; then
+    UNIT="1024"
+    UNIT_STR="kB"
+else
+    UNIT="1048576"
+    UNIT_STR="MB"
+fi
+
+# Get option switches 
+
+WLOWER=""
+WUPPER=""
+
+while getopts ":hw:c:W:K:p:u:" opt; do
+    case $opt in
+        w)
+            if [[ $OPTARG == *"%" ]]; then
+                WPERCENT=${OPTARG%?}
+                check_number $WPERCENT
+            else
+                WINT=${OPTARG}
+                check_number $WINT
+            fi
+            WLOWER="1"
+            ;;
+        W)
+            if [[ -n $WLOWER ]]; then
+            	echo "Error - options w and W cannot be used together."
+            	exit 3
+            fi
+            if [[ $OPTARG == *"%" ]]; then
+                WINODE=${OPTARG%?}
+                check_number $WINODE
+            else
+                usage
+            fi
+            WUPPER="1"
+            ;;
+        c)
+            if [[ -z $WLOWER ]]; then
+            	echo "Error - options w and c must be used together."
+            	exit 3
+            fi
+            if [[ $OPTARG == *"%" ]]; then
+                CPERCENT=${OPTARG%?}
+                check_number $CPERCENT
+            else
+                CINT=${OPTARG}
+                check_number $CINT
+            fi
+            ;;
+        K)
+            if [[ -z $WUPPER ]]; then
+            	echo "Error - options W and K must be used together."
+            	exit 3
+            fi
+            if [[ $OPTARG == *"%" ]]; then
+                CINODE=${OPTARG%?}
+                check_number $CINODE
+            else
+                usage
+            fi
+            ;;
+        p)
+            VOLUME=${OPTARG}
+            ;;
+        u)
+            PRE_UNIT=${OPTARG}
+            # bytes, KB, MB, GB or TB
+            case $PRE_UNIT in
+                bytes)
+                    UNIT="1"
+                    UNIT_STR="bytes"
+                    ;;
+                KB | kB)
+                    UNIT="1024"
+                    UNIT_STR="kB"
+                    ;;
+                MB)
+                    UNIT="1048576"
+                    UNIT_STR="MB"
+                    ;;
+                GB)
+                    UNIT="1073741824"
+                    UNIT_STR="GB"
+                    ;;
+                TB)
+                    UNIT="1099511627776"
+                    UNIT_STR="TB"
+                    ;;
+                *) 
+                    usage
+                    exit 3
+            esac
+            ;;
+        h | *) 
+            usage
+            exit 3
+            ;;
+    esac
+done
+
+if [[ -z $WPERCENT ]] && [[ -z $WINT ]] && [[ -z $WINODE ]]; then
+    usage
+fi
+
+# echo "WPERCENT = $WPERCENT"
+# echo "CPERCENT = $CPERCENT"
+# echo "WINT = $WINT"
+# echo "CINT = $CINT"
+# echo "WINODE = $WINODE"
+# echo "CINODE = $CINODE"
+# echo "VOLUME = $VOLUME"
+# echo "UNIT = $UNIT"
+
+# Prepare and execute df command
+
+INODE_SWITCH=""
+if [[ -n $WINODE ]]; then
+    INODE_SWITCH="-i"
+fi
+
+if [[ "$UNAMESTR" == 'OpenBSD' ]]; then
+    DF_OUT=`$DF $INODE_SWITCH -k $VOLUME 2>&1 | $GREP $VOLUME`
+else
+    DF_OUT=`$DF $INODE_SWITCH -P -B $UNIT $VOLUME 2>&1 | $GREP $VOLUME`
+fi
+
+if [ $? != 0 ]; then
+	echo "Error - $VOLUME not found."
+	exit 3
+fi
+
+# Fill in needed values
+
+DF_DISK=`echo "$DF_OUT" | $AWK '{print $1}'`
+DF_TOTAL=`echo "$DF_OUT" | $AWK '{print $2}'`
+DF_USED=`echo "$DF_OUT" | $AWK '{print $3}'`
+DF_FREE=`echo "$DF_OUT" | $AWK '{print $4}'`
+DF_PERC=`echo "$DF_OUT" | $AWK '{print $5}'`
+if [[ "$UNAMESTR" == 'OpenBSD' ]]; then
+    if [[ -n $WINODE ]]; then
+        DF_USED=`echo "$DF_OUT" | $AWK '{print $6}'`
+        DF_FREE=`echo "$DF_OUT" | $AWK '{print $7}'`
+        DF_PERC=`echo "$DF_OUT" | $AWK '{print $8}'`
+        DF_TOTAL=$(($DF_USED + $DF_FREE))
+    fi
+fi
+DF_PERC=${DF_PERC%?}
+let DF_PERC=100-$DF_PERC # inverted percentage value
+DF_MOUNT=`echo "$DF_OUT" | $AWK '{print $6}'`
+
+# echo "DF_DISK = $DF_DISK"
+# echo "DF_TOTAL = $DF_TOTAL"
+# echo "DF_USED = $DF_USED"
+# echo "DF_FREE = $DF_FREE"
+# echo "DF_PERC = $DF_PERC"
+# echo "DF_MOUNT = $DF_MOUNT"
+
+# Perform the check and build the output
+
+RET_CODE=0
+RET_MSG="DISK OK"
+
+if [[ $WPERCENT -ge $DF_PERC ]]; then
+    RET_CODE=1
+    RET_MSG="DISK WARNING"
+fi
+
+if [[ $CPERCENT -ge $DF_PERC ]]; then
+    RET_CODE=2
+    RET_MSG="DISK CRITICAL"
+fi
+
+if [[ $WINT -ge $DF_USED ]]; then
+    RET_CODE=1
+    RET_MSG="DISK WARNING"
+fi
+
+if [[ $CINT -ge $DF_USED ]]; then
+    RET_CODE=2
+    RET_MSG="DISK CRITICAL"
+fi
+
+if [[ $WINODE -ge $DF_PERC ]]; then
+    RET_CODE=1
+    RET_MSG="DISK WARNING"
+fi
+
+if [[ $CINODE -ge $DF_PERC ]]; then
+    RET_CODE=2
+    RET_MSG="DISK CRITICAL"
+fi
+
+if [[ -n $WPERCENT ]]; then
+    let DF_WARN="$DF_TOTAL / 100 * $WPERCENT"
+elif [[ -n $WINT ]]; then
+    DF_WARN=$WINT
+elif [[ -n $WINODE ]]; then
+    DF_WARN=$WINODE
+fi
+
+if [[ -n $CPERCENT ]]; then
+    let DF_CRIT="$DF_TOTAL / 100 * $CPERCENT"
+elif [[ -n $CINT ]]; then
+    DF_CRIT=$CINT
+elif [[ -n $CINODE ]]; then
+    DF_CRIT=$CINODE
+fi
+
+if [[ -z $INODE_SWITCH ]]; then
+    # Collect perfdata executing df again to collect output in bytes
+    if [[ "$UNAMESTR" == 'OpenBSD' ]]; then
+        PF_OUT=`$DF -k $VOLUME 2>&1 | $GREP $VOLUME`
+    else
+        PF_OUT=`$DF -P -B 1 $VOLUME 2>&1 | $GREP $VOLUME`
+    fi
+    PF_TOTAL=`echo "$PF_OUT" | $AWK '{print $2}'`
+    PF_USED=`echo "$PF_OUT" | $AWK '{print $3}'`
+    PF_FREE=`echo "$PF_OUT" | $AWK '{print $4}'`
+    PF_WARN=$DF_WARN
+    PF_CRIT=$DF_CRIT
+    PERFDATA="Total=$PF_TOTAL;$PF_WARN;$PF_CRIT;0;$PF_TOTAL Used=$PF_USED;$PF_WARN;$PF_CRIT;0;$PF_TOTAL Free=$PF_FREE;$PF_WARN;$PF_CRIT;0;$PF_TOTAL"
+    RET_MSG="$RET_MSG - free space: $VOLUME $DF_FREE/$DF_TOTAL $UNIT_STR ($DF_PERC%).|$PERFDATA"
+else
+    PERFDATA="Total=$DF_TOTAL;$DF_WARN;$DF_CRIT;0;$DF_TOTAL Used=$DF_USED;$DF_WARN;$DF_CRIT;0;$DF_TOTAL Free=$DF_FREE;$DF_WARN;$DF_CRIT;0;$DF_TOTAL"
+    RET_MSG="$RET_MSG - free inodes: $VOLUME $DF_FREE/$DF_TOTAL ($DF_PERC%).|$PERFDATA"
+fi
+
+echo $RET_MSG
+exit $RET_CODE
+

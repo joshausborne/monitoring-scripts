@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+usage="Usage: $0 -r <repo path> -b <branch> -t <tag>"
+if [ -z $1 ]
+then
+    echo $usage
+    exit 3
+fi
+while getopts ":r:b:t:h" options
+do
+    case $options in
+        r ) path=$OPTARG ;; 
+        b ) branch=$OPTARG ;;
+        t ) tag=$OPTARG ;;
+        * ) echo $usage
+            exit 3
+    esac
+done
+
+status=$(git --git-dir=$path/.git --work-tree=$path status --porcelain)
+if [ $? -gt 0 ]
+then
+    echo -n $status
+    exit 3
+fi
+
+if [ "$status" ]
+then
+    echo "WARNING: Uncommitted changes in $path"
+    exit 1
+fi
+
+
+if [ ! -z "$branch" ]
+then
+    current_branch=$(git --git-dir=$path/.git --work-tree=$path rev-parse --abbrev-ref HEAD)
+    if [ ! "$current_branch" == "$branch" ]
+    then
+        echo "CRITICAL: Repository branch mismatched"
+        exit 2
+    fi
+fi
+
+if [ ! -z "$tag" ]
+then
+    current_tag=$(git --git-dir=$path/.git --work-tree=$path describe --tags --abbrev=0)
+    if [ ! "$current_tag" == "$tag" ]
+    then
+        echo "CRITICAL: Repository tag mismatched"
+        exit 2
+    fi
+fi
+
+if [ -z "$tag" ]
+then
+    status=$(git --git-dir=$path/.git --work-tree=$path branch -v |grep -i ahead)
+    if [ "$status" ]
+    then
+        echo "WARNING: Committed changes not pushed"
+        exit 1
+    fi
+fi
+
+echo "OK: Repository is clean"
+exit 0

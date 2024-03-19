@@ -1,0 +1,88 @@
+#!/bin/bash 
+
+# check_os_updates, reloaded
+
+# created by sharuzzaman, 24-aug-2016
+# updated 29-aug-2016, jon suggested that /var/run/os-updates non-existence should just be warning, not critical
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+# we return os updates status by the content of the file /var/run/os-updates
+
+# if the file did not exist, return as warning and exit
+
+if [[ ! -e /var/run/os-updates ]]; then
+  touch /var/run/os-updates
+  #fix the selinux context if selinux is enforcing
+  selinuxstatus=`getenforce`
+  if [[ $selinuxstatus == "Enforcing" ]]; then
+    restorecon /var/run/os-updates
+  fi
+  echo "UNKNOWN : cannot access /var/run/os-updates"
+  exit 3
+fi
+
+lines=`wc -l /var/run/os-updates | awk '{print $1}'`
+
+# if the file is empty, no os updates needed
+if [[ $lines -eq 0 ]]; then
+  echo "OK : No OS update necessary | pkgs=0"
+  exit 0 # OKAY state
+elif [[ $(head -n1 /var/run/os-updates|grep ^Error|wc -l) -ne 0 ]]; then
+  echo `cat /var/run/os-updates`
+  exit 1 # WARNING state if there's an error
+else
+  pkgs=`cat /var/run/os-updates | tr "\n" " "`
+
+  warning_pkgs_list="openssl kernel linux-image"
+  for item in $warning_pkgs_list; do
+    if [[ $pkgs == *$item* ]];then
+       warning_pkgs_available+=" $item"
+    fi
+  done
+
+  critical_pkgs_list=""
+  for item in $critical_pkgs_list; do
+    if [[ $pkgs == *$item* ]];then
+       critical_pkgs_available+=" $item"
+    fi
+  done
+
+  pkgs_string="$lines pkgs ="
+  if [[ -z $critical_pkgs_available && -z $warning_pkgs_available ]]; then
+    pkgs_string+=" OK - No warning/critical pkgs"      
+  else 
+    if [[ ! -z $critical_pkgs_available ]]; then
+      pkgs_string+=" Critical: $critical_pkgs_available"
+    fi
+    if [[ ! -z $warning_pkgs_available ]]; then
+      pkgs_string+=" Warning: ${warning_pkgs_available}"
+    fi
+  fi
+
+  perf_data=" | pkgs=$lines"
+
+  # disable Nagios message max length trim
+  #if [[ ${#pkgs_string} -ge 1024 ]]; then
+  #  perfdata_len=${#perf_data}
+  #  max_len=`expr 1024 - $perfdata_len`
+  #  pkgs_string=${pkgs_string:0:$max_len}
+
+  #  return_string=${pkgs_string}${perf_data}
+  #else
+  #  return_string=${pkgs_string}${perf_data}
+  #fi
+  
+  return_string=${pkgs_string}${perf_data}
+  echo $return_string
+  if [[ -z $critical_pkgs_available && -z $warning_pkgs_available ]]; then
+    exit 0
+  elif [[ ! -z $critical_pkgs_available ]]; then
+    exit 2
+  elif [[ ! -z $warning_pkgs_available ]]; then
+    exit 1
+  else
+    exit 3
+  fi
+fi 
+

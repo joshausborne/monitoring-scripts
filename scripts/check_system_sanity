@@ -1,0 +1,173 @@
+#!/bin/bash
+
+# check_system_sanity
+# A series of little and very brief checks, collected together to be
+# peformed at once on a system. These should all be superficial, and
+# easy to add to as we discover additional things to watch for.
+#
+# Functions prefixed with "syscheck_" will be run automatically.
+# Problems will be reported on the output string; successful results
+# will usually be suppressed, unless --show-good is specified.
+# Skip specific checks with --skip-$name. Run with --help to get a list.
+# 
+# By Josh Williams <jwilliams@endpointdev.com>
+#
+# Copyright © 2020 End Point Corporation, http://www.endpointdev.com/
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+VERSION=1.0
+# Revisions:
+# 1.0  2020-04-19  Initial version with SELinux, kernel version, etc.
+
+# Define functions here
+
+function syscheck_selinux {
+    checkname=${FUNCNAME[0]/syscheck_/}
+
+    if [ ! -e /etc/selinux/config -o ! -x /usr/sbin/getenforce ]; then
+        # Can't check here
+        echo "$checkname: Skipping, no SELinux here"
+        return 0
+    fi
+
+    running_state=$( /usr/sbin/getenforce | tr '[:upper:]' '[:lower:]' )
+    if ! [[ "$running_state" =~ ^(enforcing|permissive|disabled)$ ]]; then
+        echo "$checkname: getenforce reports bogus state $running_state"
+        return 3
+    fi
+
+    config_state=$( grep ^SELINUX= /etc/selinux/config | cut -d= -f2 )
+    if ! [[ "$config_state" =~ ^(enforcing|permissive|disabled)$ ]]; then
+        echo "$checkname: config set to erroneous state $config_state"
+        return 3
+    fi
+
+    if [[ "$running_state" != "$config_state" ]]; then
+        echo "$checkname: running state and config differ"
+        return 1
+    fi
+
+    echo "$checkname: good"
+    return 0
+}
+
+function syscheck_newkernel {
+    checkname=${FUNCNAME[0]/syscheck_/}
+
+    # TODO: Is there a way to work out what grub will boot into?
+    # That's what we really want to know...
+    # TODO: And can we tell when we're paravirt, like running Linode kernels?
+
+    newest_kernel=$(ls --color=never /boot/vmlinuz-* | sort -Vr | head -n1)
+    newest_kernel_version=${newest_kernel/\/boot\/vmlinuz-/}
+
+    running_kernel_version=$(uname -r)
+
+    if [[ $newest_kernel_version != $running_kernel_version ]]; then
+        echo "$checkname: Running kernel $running_kernel_version but would boot $newest_kernel_version"
+        return 1
+    fi
+
+    echo "$checkname: good"
+    return 0
+}
+
+function syscheck_fsperms {
+    checkname=${FUNCNAME[0]/syscheck_/}
+    retstring=""
+
+    # TODO: Probably should perform some kind of mask instead of an exact check
+    # TODO: And maybe declare a list to loop through if we add a bunch of these
+
+    if [ -d /etc/.git ]; then
+        perms=$(stat -c '%a' /etc/.git)
+        if [[ "$perms" != "700" ]]; then
+            retstring="$retstring /etc/.git expected 700, found $perms"
+        fi
+    fi
+
+    if [ -n "$retstring" ]; then 
+        echo "$checkname: $retstring"
+        return 2
+    fi
+    echo "$checkname: good"
+    return 0
+}
+
+# Consider: Read in check_system_sanity_* plug-in type scripts here?
+
+
+# Runner code below
+
+function skip_test {
+    skips="$skips${skips+\\|}$*"
+}
+
+function show_help {
+    echo -n "$(basename $0) [--show-good]"
+    for syscheckfunction in $(compgen -A function | grep '^syscheck_');
+    do
+        echo -n " [--skip-${syscheckfunction/syscheck_/}]"
+    done
+    echo " # $VERSION"
+    exit 3
+}
+
+# Parse arguments
+for arg in "$@"; do
+    case $arg in
+        --show-good | --verbose | -v)
+            showgood=1
+            ;;
+        --skip-*)
+            skip_test ${arg/--skip-/}
+            ;;
+        *)
+            show_help
+            ;;
+    esac
+done
+
+finalval=0
+# Run the functions we've defined
+for syscheckfunction in $(compgen -A function | grep '^syscheck_');
+do
+    # Skip any tests we've been told to
+    if [[ -n $skips ]]; then
+        if echo $syscheckfunction | grep -q "$skips"; then
+            continue
+        fi
+    fi
+
+    retstring=$($syscheckfunction)
+    retval=$?
+
+    if [[ $retval -ne 0 || $showgood -eq 1 ]]; then
+        finalstring="$finalstring${finalstring+, }$retstring"
+    fi
+    # Ultimately return max value: crit > warn, unknown > crit
+    if [[ $retval -gt $finalval ]]; then
+        finalval=$retval
+    fi
+done
+
+if [[ -z "$finalstring" ]]; then
+    finalstring="All checks report good"
+fi
+if [[ -n "$skips" ]]; then
+    finalstring="$finalstring (skipped: ${skips/\\|/, })"
+fi
+echo $finalstring
+exit $finalval

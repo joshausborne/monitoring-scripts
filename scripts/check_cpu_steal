@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# created by sharuzzaman
+# updated on 23/aug/2016 - added performance data feature
+# updated on 20/aug/2016 - added -w and -c arguments
+# License: BSD 2-clause
+
+# if no arguments given
+if [[ "$#" -eq 0 ]]; then
+  # we are using preset level, number from golden ratio of 100
+  warning=62
+  critical=85
+else
+  # we are getting the level from command line arguments
+  TEMP=`getopt -o w:c: -- "$@"`
+  eval set -- "$TEMP"
+
+  while true ; do
+    case "$1" in
+      -w)
+         warning="$2" ; shift 2 ;;
+      -c)
+         critical="$2" ; shift 2 ;;
+      --)
+         shift ; break ;;
+      *) 
+         echo "Internal error!" ; exit 1 ;;
+    esac
+  done
+fi
+
+#if we have mpstat, use it, else use top
+if [[ -e /usr/bin/mpstat ]]; then
+  cpu_steal=`mpstat | awk 'FNR == 3 {for (i=1;i<=NF;i++) if ($i ~ /steal/){steal=i; getline} {print $steal}}'`
+else
+  top_output=`top -b -n1 |grep Cpu`
+
+  #get last column
+  last_column=`echo $top_output | awk '{print $NF}'`
+
+  if [[ $last_column == *"%"* ]]; then
+    percent_detected="true"
+  else
+    percent_detected="false"
+  fi
+
+  if [[ "$percent_detected" == "true" ]]; then
+    cpu_steal=`echo $top_output | awk '{print $NF}' | cut -d'%' -f1`
+  else
+    cpu_steal=`echo $top_output | awk '{print $(NF-1)}'`
+  fi
+fi
+
+# are we in critical, warning, or ok state?
+
+# check if cpu_steal bigger than or equal $critical, will return 0 if false, 1 if true
+status_critical=`bc <<< "$cpu_steal >= $critical"`
+
+case $status_critical in
+0)
+  # we are warning or ok
+  status_warning=`bc <<< "$cpu_steal >= $warning"`
+  
+  case $status_warning in
+  0)
+    # we are ok
+    echo "OK - cpu steal: $cpu_steal | cpu_steal=$cpu_steal"
+    exit 0
+  ;;
+  1)
+    # we are warning
+    echo "WARNING - cpu steal: $cpu_steal | cpu_steal=$cpu_steal"
+    exit 1
+  ;;
+  esac
+;;
+1)
+  # we are critical
+  echo "CRITICAL - cpu steal: $cpu_steal | cpu_steal=$cpu_steal"
+  exit 2
+;;
+esac
+
+  
+

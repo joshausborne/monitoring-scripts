@@ -1,0 +1,130 @@
+#!/bin/bash
+
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+PROGNAME=`basename $0`
+
+usage() {
+    echo ""
+    echo "Usage:"
+    echo " $PROGNAME -w limit -c limit [-u unit]"
+    echo ""
+    echo "Options:"
+    echo " -h"
+    echo "    Print this help screen"
+    echo " -w=INTEGER"
+    echo "    Exit with WARNING status if uptime is equal or more than INTEGER units"
+    echo " -c=INTEGER"
+    echo "    Exit with CRITICAL status if uptime is equal or more than INTEGER units"
+    echo " -u=STRING"
+    echo "    Choose days, hours or minutes (default: days)"
+    echo ""
+    exit 3
+}
+
+check_number() {
+    if ! [[ $1 =~ ^[0-9]+$ ]] ; then usage; fi
+}
+
+# Find needed commands
+
+AWK=`which awk 2>&1`
+AWK_EXISTS=$?
+if [ "$AWK_EXISTS" != 0 ] || [ ${#AWK} == 0 ]
+then
+	echo "Error - can't find awk."
+	exit 3
+fi
+BC=`which bc 2>&1`
+BC_EXISTS=$?
+if [ "$BC_EXISTS" != 0 ] || [ ${#BC} == 0 ]
+then
+	echo "Error - can't find bc."
+	exit 3
+fi
+
+# Set defaults
+
+WINT=""
+CINT=""
+UNIT="86400"
+UNIT_STR="days"
+
+# Get option switches
+
+while getopts ":hw:c:u:" opt; do
+    case $opt in
+        w)
+            WINT=${OPTARG}
+            check_number $WINT
+            ;;
+        c)
+            CINT=${OPTARG}
+            check_number $CINT
+            ;;
+        u)
+            PRE_UNIT=${OPTARG}
+            # days, hours, minutes
+            case $PRE_UNIT in
+                days)
+                    UNIT="86400"
+                    UNIT_STR="days"
+                    ;;
+                hours)
+                    UNIT="3600"
+                    UNIT_STR="hours"
+                    ;;
+                minutes,min)
+                    UNIT="60"
+                    UNIT_STR="minutes"
+                    ;;
+                *)
+                    usage
+                    exit 3
+            esac
+            ;;
+        h | *)
+            usage
+            exit 3
+            ;;
+    esac
+done
+
+if [[ -z $WINT ]] || [[ -z $CINT ]]; then
+    usage
+fi
+
+# TODO: check c more than w
+
+#echo "WINT = $WINT"
+#echo "CINT = $CINT"
+#echo "UNIT = $UNIT"
+
+# Prepare and execute command
+
+TIME=`$AWK -v unit="$UNIT" '{print $0/unit;}' /proc/uptime`
+
+#echo "TIME = $TIME"
+
+# Perform the check and build the output
+
+RET_CODE=0
+RET_MSG="UPTIME OK"
+
+if [[ $(echo "$TIME >= $WINT" | $BC) -ne 0 ]]; then
+    RET_CODE=1
+    RET_MSG="UPTIME WARNING"
+fi
+
+if [[ $(echo "$TIME >= $CINT" | $BC) -ne 0 ]]; then
+    RET_CODE=2
+    RET_MSG="UPTIME CRITICAL"
+fi
+
+PERFDATA="uptime=$TIME;$WINT;$CINT;;"
+RET_MSG="$RET_MSG - $TIME $UNIT_STR. |$PERFDATA"
+
+echo $RET_MSG
+exit $RET_CODE
+

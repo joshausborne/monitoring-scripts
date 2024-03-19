@@ -1,0 +1,38 @@
+#!/bin/bash 
+
+# check_mod_status_apache
+
+# created on 31-aug-2016 by sharuzzaman
+# updated on 6-sep-2016 - added curl command for nginx
+# 8-oct-2016 - created check_mod_status_apachec from check_mod_status
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+default_port=80
+
+if [[ ! -z $1 ]]; then
+  port=$1
+else
+  port=$default_port
+fi
+
+# curl the page and assign to variable
+data=`curl -s http://localhost:$port/server-status?auto`
+total_accesses=`echo "$data"|grep "Total Accesses"|awk '{print $3}'`
+total_kbytes=`echo "$data"|grep "Total kBytes"|awk '{print $3}'`
+cpuload=`echo "$data"|grep "CPULoad"|awk '{print $2}'`
+if [[ $cpuload =~ .*[0-9]e.* ]]; then
+  cpuload=`echo $cpuload | awk '{printf "%9.9f",$1}'`
+fi
+uptime=`echo "$data"|grep "^Uptime"|awk '{print $2}'`
+reqpersec=`echo "$data"|grep "ReqPerSec"|awk '{print $2}'`
+bytespersec=`echo "$data"|grep "BytesPerSec"|awk '{print $2}'`
+bytesperreq=`echo "$data"|grep "BytesPerReq"|awk '{print $2}'`
+busyworkers=`echo "$data"|grep "BusyWorkers"|awk '{print $2}'`
+idleworkers=`echo "$data"|grep "IdleWorkers"|awk '{print $2}'`
+
+output="total_accesses="${total_accesses:-0}" total_kbytes="${total_kbytes:-0}" cpuload="${cpuload:-0}" uptime="${uptime:-0}" reqpersec="${reqpersec:-0}" bytespersec="${bytespersec:-0}" bytesperreq="${bytesperreq:-0}" busyworkers="${busyworkers:-0}" idleworkers="${idleworkers:-0}
+echo "OK | $output"
+exit_status=0
+
+exit $exit_status

@@ -1,0 +1,29 @@
+#!/bin/bash 
+
+# check_mod_status_nginx
+
+# created on 31-aug-2016 by sharuzzaman
+# updated on 6-sep-2016 - added curl command for nginx
+# 5-oct-2016 - created check_mod_status_nginx by splitting check_mod_status
+# Copyright © End Point Corporation
+# License: BSD 2-clause
+
+default_port=80
+
+if [[ ! -z $1 ]]; then
+  port=$1
+else
+  port=$default_port
+fi
+
+data=`curl -s http://localhost:$port/nginx_status`
+active_connections=`echo "$data" | grep "Active" | awk '{print $3}'`
+server_accepts=`echo "$data" | grep -Ev '[[:alpha:]]' | awk '{print $1}'`
+server_handled=`echo "$data" | grep -Ev '[[:alpha:]]' | awk '{print $2}'`
+server_requests=`echo "$data" | grep -Ev '[[:alpha:]]'| awk '{print $3}'`
+reading=`echo "$data" | tail -n 1 |awk '{print $2}'`
+writing=`echo "$data" | tail -n 1 |awk '{print $4}'`
+waiting=`echo "$data" | tail -n 1 |awk '{print $6}'`
+echo "OK | active_connections=${active_connections:-0} server_accepts=${server_accepts:-0} server_handled=${server_handled:-0} server_requests=${server_requests:-0} reading=${reading:-0} writing=${writing:-0} waiting=${waiting:-0}"
+exit_status=0
+exit $exit_status
